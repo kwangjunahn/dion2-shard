@@ -131,6 +131,7 @@ We include Dion, Muon, and several alternative implementations of the optimizers
 * `dion_reference.py`: An implementation without batching, communication overlapping, or split all-reduce. This version of Dion is intended to closely follow the algorithms as described in our [Dion paper](https://arxiv.org/pdf/2504.05295).
 * `dion_simple.py`: A simplified illustration of the Dion update rule in a single Python function, provided for educational value.
 * `muon_reference.py`: A version of Muon by [Moonshot AI](https://github.com/MoonshotAI/Moonlight), modified to take similar arguments as `muon.py`.
+* `normuon.py`: [NorMuon](https://arxiv.org/abs/2510.05491), a variant of the Muon optimizer that introduces neuron-wise normalization to improve stability and convergence efficiency, modified to take similar arguments as `muon.py`.
 
 
 ## Building Parameter Groups

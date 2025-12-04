@@ -20,7 +20,7 @@ from .scalar_opts import adamw_update_foreach_async, lion_update_foreach_async
 
 # Reuse Muon's helper functions
 from .muon import (
-    muon_update_newton_schulz, muon_update_post_orthogonalize, muon_update_pre_orthogonalize, zeropower_via_newtonschulz5
+    muon_update_newton_schulz, muon_update_post_orthogonalize, muon_update_pre_orthogonalize, zeropower_via_newtonschulz5, adjust_lr_spectral_norm, adjust_lr_rms_norm
 )
 
 class NorMuon(Optimizer):
@@ -552,7 +552,7 @@ def muon_update_batch_async(
     elif adjust_lr == "spectral_norm":
         adjusted_lr = adjust_lr_spectral_norm(lr, X[0].shape, flatten=flatten)
     elif adjust_lr == "rms_norm":
-        adjusted_lr = 0.2 * lr # different from muon which uses 0.2 * sqrt(max(fan_out,fan_in)) * lr
+        adjusted_lr = adjust_lr_rms_norm(lr, X[0].shape, flatten=flatten)
     else:
         raise ValueError(f"Unknown adjust_lr value: {adjust_lr}")
 
@@ -565,19 +565,6 @@ def muon_update_batch_async(
         weight_decay=weight_decay,
         cautious_wd=cautious_wd,
     )
-
-
-
-def adjust_lr_spectral_norm(lr, param_shape, flatten):
-    # Adjust from spectral norm 1 to RMS operator norm 1
-    # https://arxiv.org/abs/2310.17813
-    if flatten:
-        fan_out = param_shape[0]
-        fan_in = math.prod(param_shape[1:])
-    else:
-        fan_out, fan_in = param_shape[-2:]
-    adjusted_lr = lr * math.sqrt(1 / fan_in) # different from muon which uses sqrt(fan_out/fan_in)
-    return adjusted_lr
 
 
 
@@ -594,6 +581,7 @@ def normuon_normalization(
     """
     V_dtype = V[0].dtype
     U = [u.to(dtype=V_dtype) for u in U]
+    norm_U = [u.norm(p=2, dim=(-2, -1), keepdim=True) for u in U]  # list of ||u||_F, shape [*, 1, 1]
 
     U_sq = torch._foreach_mul(U, U)  # list of u*u, same shapes as U
     neuron_norms = [
@@ -606,6 +594,9 @@ def normuon_normalization(
     torch._foreach_add_(denom, 1e-8)             # denom[i] += 1e-8
     normalized_U = torch._foreach_div(U, denom)  # list of u / denom
 
+    norm_U_new = [nu.norm(p=2, dim=(-2, -1), keepdim=True) for nu in normalized_U]  # list of ||normalized_u||_F, shape [*, 1, 1]
+    ratio = torch._foreach_div(norm_U, norm_U_new)  # list of ||u||_F / ||normalized_u||_F, shape [*, 1, 1]
+    torch._foreach_mul_(normalized_U, ratio)        # normalized_u[i] *= ratio
 
     return normalized_U
 
