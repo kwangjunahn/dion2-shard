@@ -20,7 +20,7 @@ from .scalar_opts import adamw_update_foreach_async, lion_update_foreach_async
 
 # Reuse Muon's helper functions
 from .muon import (
-    muon_update_newton_schulz,
+    muon_update_newton_schulz, muon_update_post_orthogonalize, muon_update_pre_orthogonalize, zeropower_via_newtonschulz5
 )
 
 class NorMuon(Optimizer):
@@ -571,35 +571,7 @@ def adjust_lr_spectral_norm(lr, param_shape, flatten):
     adjusted_lr = lr * math.sqrt(1 / fan_in) # different from muon which uses sqrt(fan_out/fan_in)
     return adjusted_lr
 
-@torch.compile(fullgraph=True)
-def muon_update_pre_orthogonalize(
-    G: List[Tensor],
-    M: List[Tensor],
-    momentum: Tensor,
-    nesterov: bool,
-) -> List[Tensor]:
-    """
-    Update momentum with gradient and compute the input to orthogonalization.
-    Inputs and outputs should be lists of regular Tensor, not DTensor.
-    This is a separate function for compatibility with torch.compile().
-    """
-    dtype = M[0].dtype
-    G = [g.to(dtype=dtype) for g in G]
 
-    # Update momentum with new gradient
-    torch._foreach_mul_(M, momentum)
-    torch._foreach_add_(M, G)
-
-    if nesterov:
-        U = torch._foreach_mul(M, momentum)
-        torch._foreach_add_(U, G)
-    else:
-        U = M
-
-    # Convert to bfloat16 before communication
-    U = [u.to(dtype=torch.bfloat16) for u in U]
-
-    return U
 
 @torch.compile(fullgraph=True)
 def normuon_normalization(
@@ -630,68 +602,4 @@ def normuon_normalization(
     return normalized_U
 
 
-@torch.compile(fullgraph=True)
-def muon_update_post_orthogonalize(
-    X: List[Tensor],
-    U: List[Tensor],
-    base_lr: Tensor,
-    adjusted_lr: Tensor,
-    weight_decay: Tensor,
-    cautious_wd: bool = False,
-):
-    """
-    Apply weight decay and weight update after orthogonalization.
-    Inputs and outputs should be lists of regular Tensor, not DTensor.
-    This is a separate function for compatibility with torch.compile().
-    """
-    if cautious_wd:
-        # Apply cautious weight decay: only where update and parameter signs align
-        # Reference: https://arxiv.org/pdf/2510.12402
-        coeff = base_lr * weight_decay
 
-        decay_masks = torch._foreach_mul(X, U)
-        decay_masks = torch._foreach_sign(decay_masks)  # {-1, 0, 1}
-        decay_masks = torch._foreach_add(decay_masks, 1)  # {0, 1, 2}
-        decay_masks = torch._foreach_minimum(decay_masks, 1)  # {0, 1, 1}
-
-        decay_terms = torch._foreach_mul(X, decay_masks)
-        decay_terms = torch._foreach_mul(decay_terms, coeff)
-        torch._foreach_sub_(X, decay_terms)
-    else:
-        # Apply weight decay
-        torch._foreach_mul_(X, 1 - base_lr * weight_decay)
-
-    # Weight update
-    U = torch._foreach_mul(U, adjusted_lr)
-    torch._foreach_sub_(X, U)
-
-
-@torch.compile(fullgraph=True)
-def zeropower_via_newtonschulz5(G: Tensor, epsilon: float = 1e-7):
-    """
-    Newton-Schulz iteration to approximate the orthogonalization of X.
-    """
-    # Newton-Schulz constants
-    ns_consts = [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ]
-
-    X = G.to(dtype=torch.bfloat16)
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-
-    # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) + epsilon)
-
-    for a, b, c in ns_consts:
-        A = X @ X.mT
-        B = b * A + c * (A @ A)
-        X = a * X + B @ X
-
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-    return X
