@@ -102,7 +102,7 @@ class NorMuon(Optimizer):
             beta2=betas[1],
             weight_decay=weight_decay,
             cautious_wd=cautious_wd,
-            algorithm="muon",
+            algorithm="normuon",
             step=0,
             epsilon=epsilon,
             nesterov=nesterov,
@@ -156,7 +156,7 @@ class NorMuon(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        muon_groups = []
+        normuon_groups = []
         lion_groups = []
         adamw_groups = []
 
@@ -166,8 +166,8 @@ class NorMuon(Optimizer):
 
             # Split parameter groups by algorithm
             algo = group["algorithm"]
-            if algo == "muon":
-                muon_groups.append(group)
+            if algo == "normuon":
+                normuon_groups.append(group)
             elif algo == "lion":
                 lion_groups.append(group)
             elif algo == "adamw":
@@ -176,11 +176,11 @@ class NorMuon(Optimizer):
                 raise ValueError(f"Unknown algorithm: {algo}")
 
         # Create async tasks for each algorithm
-        muon_tasks = self._create_muon_tasks(muon_groups)
+        normuon_tasks = self._create_normuon_tasks(normuon_groups)
         lion_tasks = self._create_lion_tasks(lion_groups)
         adamw_tasks = self._create_adamw_tasks(adamw_groups)
 
-        all_tasks = chain(muon_tasks, lion_tasks, adamw_tasks)
+        all_tasks = chain(normuon_tasks, lion_tasks, adamw_tasks)
         runtime = AsyncRuntime(all_tasks, max_concurrent_tasks=3)
         runtime.run()
 
@@ -196,24 +196,24 @@ class NorMuon(Optimizer):
             state["momentum"] = torch.zeros_like(param)
             if algo == "adamw":
                 state["variance"] = torch.zeros_like(param)
-            if algo == "muon":
+            if algo == "normuon":
                 state["variance_neuron"] = torch.zeros_like(param[..., 0:1])
         return state
 
-    def _create_muon_tasks(
+    def _create_normuon_tasks(
         self,
         param_groups: List[dict],
-        algo_name: str = "muon",
+        algo_name: str = "normuon",
     ) -> Generator["AsyncTask", None, None]:
         """
-        Helper function to create batches of Muon matrices and generate
+        Helper function to create batches of NorMuon matrices and generate
         AsyncTask objects so we can process multiple batches concurrently.
         """
         for group in param_groups:
             assert group["algorithm"] == algo_name
             assert all(
                 p.ndim >= 2 for p in group["params"]
-            ), "Muon optimizer only supports matrix parameters."
+            ), "NorMuon optimizer only supports matrix parameters."
 
             group_params = [p for p in group["params"] if p.grad is not None]
             if not group_params:
@@ -293,7 +293,7 @@ class NorMuon(Optimizer):
                         sharded_tensor_dim = shard_placements[0][1].dim
                     elif len(shard_placements) > 1:
                         raise NotImplementedError(
-                            "Muon does not support parameters with multiple sharded dimensions."
+                            "NorMuon does not support parameters with multiple sharded dimensions."
                         )
 
                     # Check that the sharded mesh dimension matches optimizer's device mesh
