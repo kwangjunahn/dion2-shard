@@ -124,10 +124,10 @@ Our main implementations of Dion (`dion.py`) and Muon (`muon.py`) support the fo
 
 | Parallelization    | Dion | Dion2 | Muon | NorMuon |
 |--------------------|------|-------|------|---------| 
-| Single device      | Yes  |  Yes  | Yes  | Yes     |
-| PyTorch DDP        | Yes  |  Yes  | Yes  | Yes     |
-| PyTorch FSDP2      | Yes  |  Yes  | Yes  | Yes     |
-| PyTorch FSDP2 + TP | Yes  |  No   | No   | No      |
+| Single device      | Yes  |  Yes  | Yes  |   Yes   |
+| PyTorch DDP        | Yes  |  Yes  | Yes  |   Yes   |
+| PyTorch FSDP2      | Yes  |  Yes  | Yes  |   Yes   |
+| PyTorch FSDP2 + TP | Yes  |  No   | No   |   No    |
 
 For faster performance, both of these optimizers will process parameters in batches and interleave multiple batches to overlap compute with communication.
 
@@ -135,10 +135,15 @@ We include optimizer implementations in the `dion/` directory of this repo.
  
 * `dion.py`: High-performance version of Dion. Depending on how each batch of matrices is sharded, we select the best communication patterns to compute Dion's orthonormal update. All-reduce operations may be split into reduce-scatter and all-gather across the batch dimension to more efficiently distribute work and avoid redundant computation.
 * `muon.py`: High-performance version of Muon. For sharded matrices, all-to-all communication is used to simultaneously unshard and distribute a batch of matrices. For replicated matrices, Muon will distribute work across all devices and all-gather final results.
+* `dion2.py`: A preliminary implementation of Dion2, which uses a similar all-to-all communication pattern to distribute orthonormalization. Only an $\alpha$-fraction of the momentum matrix is orthonormalized, leaving room for additional communication optimizations.
+* `normuon.py`: A variant of the Muon optimizer that introduces neuron-wise normalization to improve stability and convergence efficiency, modified to take similar arguments as `muon.py`. See [the paper](https://arxiv.org/abs/2510.05491) for more details.
+
+We also provide some reference implementations:
+
 * `dion_reference.py`: An implementation without batching, communication overlapping, or split all-reduce. This version of Dion is intended to closely follow the algorithms as described in our [Dion paper](https://arxiv.org/pdf/2504.05295).
 * `dion_simple.py`: A simplified illustration of the Dion update rule in a single Python function, provided for educational value.
 * `muon_reference.py`: A version of Muon by [Moonshot AI](https://github.com/MoonshotAI/Moonlight), modified to take similar arguments as `muon.py`.
-* `normuon.py`: [NorMuon](https://arxiv.org/abs/2510.05491), a variant of the Muon optimizer that introduces neuron-wise normalization to improve stability and convergence efficiency, modified to take similar arguments as `muon.py`.
+
 
 
 ## Building Parameter Groups
