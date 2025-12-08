@@ -24,14 +24,14 @@ val_tokens: 10485760
 save_every: 0
 
 # — Weights & Biases logging —
-wandb_project_name: dion-debug
+wandb_project_name: gpt-train
 wandb_job_name: null
 no_wandb: false
 
 # — Distributed training —
 dp_size: null      # data‐parallel size
 fs_size: null      # FSDP size
-tp_size: null      # tensor‐parallel size
+tp_size: null      # DO NOT USE TP for NorMuon
 
 # — Miscellaneous flags —
 debug: false

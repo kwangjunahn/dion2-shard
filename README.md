@@ -1,9 +1,11 @@
-# Dion: Distributed Orthonormal Updates
+# Welcome to Microsoft/Dion codebase!
 
-This repository provides efficient implementations of Dion and Muon optimizers for distributed ML training.
- 
-* See our paper for more information on Dion: https://arxiv.org/pdf/2504.05295.
-* See the original blog post on Muon: https://kellerjordan.github.io/posts/muon/
+This repository provides efficient implementations of orthonormal optimizers for distributed ML training.
+It has the following optimizers:
+* [Muon](https://kellerjordan.github.io/posts/muon/)
+* [Dion](https://arxiv.org/pdf/2504.05295)
+* Dion2
+* [NorMuon](https://arxiv.org/abs/2510.05491) 
 
 ## Table of Contents
 <details>
@@ -36,12 +38,12 @@ This repository provides efficient implementations of Dion and Muon optimizers f
 
 ## Requirements
 
-This code is written for modern PyTorch (version 2.7 or newer) using DTensor-based parallelism. This includes FSDP2 with `fully_shard`and tensor parallelism (TP) with `parallelize_module`. Support for other distributed training APIs is not guaranteed.
+This code is written for modern PyTorch (version 2.7 or newer) using DTensor-based parallelism. This includes FSDP2 with `fully_shard` and tensor parallelism (TP) with `parallelize_module`. Support for other distributed training APIs is not implemented.
 
 
 ## Quick Start
 
-Dion and Muon optimizers are available as a `pip` package! Install to use in your project:
+Our implementations are available as a `pip` package! Install to use in your project:
 
 ```bash
 pip install git+https://github.com/microsoft/dion.git
@@ -50,10 +52,10 @@ pip install git+https://github.com/microsoft/dion.git
 Then in your code, you can use:
 
 ```python
-from dion import Dion, Muon
+from dion import Dion, Dion2, Muon, NorMuon
 ```
 
-Please carefully go through this readme for detailed instructions on using our optimizers. There are major differences compared to PyTorch built-in optimizers, like `Adam`/`AdamW`.
+Please carefully go through this readme for detailed instructions on using our optimizers. There are major differences compared to PyTorch built-in optimizers, such as `Adam`/`AdamW`.
 
 ### Running Our Sample Training Script
 
@@ -71,7 +73,7 @@ python data/cached_fineweb10B.py 30
 
 ### Distributed Data Parallel (DDP) Training
 
-To train a GPT-small model using Dion with 8 GPUs (adjust as needed for your setup):
+To train a GPT-small model using Dion2 with 8 GPUs (adjust as needed for your setup):
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py --config configs/dion_160m.yaml
 ```
@@ -82,7 +84,7 @@ This will launch Distributed Data Parallel (DDP) training.
 To enable more advanced distributed strategies such as Fully Sharded Data Parallel (FSDP) and Tensor Parallelism (TP), you can specify the configuration in the `dion_160m.yaml` file: 
 
 ```yaml
-# — Distributed training —
+# Example of sharding configuration
 dp_size: 2      # data‐parallel size
 fs_size: 2      # FSDP size
 tp_size: 2      # tensor‐parallel size
@@ -90,16 +92,21 @@ tp_size: 2      # tensor‐parallel size
 
 This example sets up a hybrid configuration with DDP × FSDP × TP = 2 × 2 × 2.
 
-Alternatively, you can override these values directly from the command line. All three values must be explicitly given, but a size may be set to `1` to omit a parallelism dimension.
+Alternatively, you can override these values directly from the command line. All three values must be explicitly given, but a size may be set to `1` to omit a parallelism dimension. For instance, for FSDP over 8 devices, you can either configure from `.yaml` as:
+
+```yaml
+# Example of pure FSDP configuration
+dp_size: 1      # data‐parallel size
+fs_size: 8      # FSDP size
+tp_size: 1      # tensor‐parallel size
+```
+
+or use the following command:
 
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py --config configs/dion_160m.yaml \
   --dp_size 2 --fs_size 2 --tp_size 2
 ```
-
-####  Example Weights & Biases (wandb) Plots
-
-With the appropriate configuration, you should be able to reproduce the results shown in the [validation curves for GPT-small](https://microsoft-research.wandb.io/t-gmagakyan/dion-exp/reports/Validation-curves-for-GPT-small--VmlldzoxNjk5OA?accessToken=52e6z4d18yfkewz1bawlkmwc2m91al9ssa7rpwvnx1f1xa66j15lr7x315wj2kys).
 
 
 ## Introduction
