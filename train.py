@@ -1,3 +1,5 @@
+#train.py below
+
 import argparse
 import math
 import os
@@ -28,6 +30,7 @@ from dion import DionSimple
 from dion import Muon
 from dion import MuonReference
 from dion import Dion2
+from dion import Dion2 as Dion2Old
 from dion import NorMuon
 
 
@@ -1004,6 +1007,10 @@ def main():
                 # Calling this is necessary to synchronize state across the replicate mesh
                 # Otherwise, checkpoint results will not be consistent
                 optimizer.synchronize_for_checkpoint()
+
+ 
+            
+
 
             # Save a distributed checkpoint
             checkpoint_manager.save(step=step)

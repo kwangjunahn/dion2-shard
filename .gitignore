@@ -8,3 +8,4 @@ output/
 .venv/
 submit.ipynb
 aztool/
+dion.egg-info/
