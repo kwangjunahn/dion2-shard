@@ -1,4 +1,4 @@
-#train.py below
+# train.py below
 
 import argparse
 import math
@@ -67,7 +67,7 @@ class Hyperparameters:
     lr: float = 0.02
     mu: float = 0.95
     weight_decay: float = 0.01
-    rank_fraction: float = 0.125
+    rank_fraction: float = 0.125 
 
     # Optimizer specific hyperparameters
     qr_method: str = "rcqr"
@@ -76,7 +76,10 @@ class Hyperparameters:
     replicate_mesh_grad_sync: bool = False
     mixed_precision: bool = False
     adjust_lr: str = "spectral_norm"  # for Muon only
+
+    # For printing out selection choice in Dion2
     verbose: bool = False
+
 
 # Helper function to only print on global rank 0
 MASTER_PROCESS = True
@@ -450,7 +453,7 @@ def init_optimizer(
             lr=hp.lr,
             fraction=hp.rank_fraction,
             ef_decay=hp.mu,
-            weight_decay=hp.weight_decay,
+            weight_decay=hp.weight_decay, 
             adjust_lr=hp.adjust_lr,
             use_triton=(not cli_args.no_triton),
             verbose=hp.verbose,
@@ -1034,10 +1037,6 @@ def main():
                 # Calling this is necessary to synchronize state across the replicate mesh
                 # Otherwise, checkpoint results will not be consistent
                 optimizer.synchronize_for_checkpoint()
-
- 
-            
-
 
             # Save a distributed checkpoint
             checkpoint_manager.save(step=step)

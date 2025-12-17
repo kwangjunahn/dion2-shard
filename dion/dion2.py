@@ -90,8 +90,7 @@ class Dion2Old(Optimizer):
             raise ValueError(
                 f"Invalid adjust_lr value: {adjust_lr}. Must be 'spectral_norm', 'rms_norm', or None."
             )
-        
-        print(f"================Dion2 Old Optimizer initialized===========")
+
         defaults = dict(
             lr=lr,
             ef_decay=ef_decay,
@@ -141,7 +140,6 @@ class Dion2Old(Optimizer):
             self._newton_schulz_func = newton_schulz_triton
         else:
             self._newton_schulz_func = zeropower_via_newtonschulz5
-        
 
     @torch.no_grad()
     def step(self, closure=None):
