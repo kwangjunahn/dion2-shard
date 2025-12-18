@@ -308,9 +308,8 @@ optimizer = Dion2(                              # or Muon or NorMuon
 
 
 
-### Device Mesh for Dion
-
-We demonstrate this for Dion first, since it has the most comprehensive parallelism support in our current implementation.  
+### 2D-Sharding Support for Dion
+  
 Dion supports up to two sharded mesh dimensions and any number of data-parallel replicated mesh dimensions. The sharded meshes are referred to as `outer_shard_mesh` and `inner_shard_mesh`. Dion's internal optimizer states can be sharded over both meshes. During the update computation, Dion will orthonormalize a low-rank matrix that is replicated across `outer_shard_mesh`, but always remains sharded across `inner_shard_mesh`. Thus, the `inner_shard_mesh` is more communication-intensive and works best with intra-node tensor parallelism. Both sharding meshes must be one-dimensional.
 
 Unused meshes may be omitted or given as `None`. If only one sharding dimension is used (e.g. only FSDP without TP), we recommend providing it as the `outer_shard_mesh`. Dion will execute a faster single-device orthonormalization routine in this case, since the input matrix to be orthonormalized will not be sharded.
@@ -333,7 +332,21 @@ optimizer = Dion(
 ```
 
 
-## Compressed Data-Parallel Gradient Sync
+
+
+## Best Practices
+
+* **Dion rank fraction:** The most important Dion-specific hyperparameter is the *rank fraction*, which controls the amount of low-rank compression. Setting `rank_fraction=1.0` resulting in full-rank updates without any compression, similar to Muon. Empirically, it appears that larger models are more tolerant of low-rank compression. At 3B parameters, `rank_fraction=0.25` (1/4 rank) achieves nearly equivalent performance as full-rank, and we expect that 1/8, 1/16, and perhaps lower rank fractions will work well at 10B+ scale.
+* **Lion vs. AdamW:** We have found that Lion performs better than AdamW for optimizing scalar parameters when used with Dion/Muon for orthonormal matrix updates.
+* **2D sharding:** If weights are sharded with both FSDP and TP, it is required that the sharding methods are applied to different matrix dimensions. The TP sharding dimension is controlled via `RowwiseParallel` and `ColwiseParallel`, but the FSDP sharding dimension needs to be manually specified when applied on top of TP. See `models/gpt_model.py` for an example of explicitly providing `fully_shard()` with per-parameter shard dimensions. Double-sharded matrices along the same dimension will raise an error in Dion.
+* **Learning rate scaling:** Dion will automatically scale the provided learning rate by `sqrt(d_out / d_in)` for matrix parameters. Muon will apply the same scaling by default, but also supports the `0.2 * sqrt(max(d_in, d_out))` scale factor recommended by Moonshot AI. Our default scale factor is intended to induce a consistent change to activation vector values, which enables learning rate transfer across model size. See [Deriving Muon](https://jeremybernste.in/writing/deriving-muon) for more information.
+* **Nesterov momentum:** In Muon, we set Nesterov momentum to `False` by default, as we observed better performance without it. Dion does not implement Nesterov momentum.
+
+
+## Other Features
+
+
+### Compressed Data-Parallel Gradient Sync for Dion
 
 Dion is capable of *skipping the usual full-gradient all-reduce* by only synchronizing low-rank matrices instead. Depending on the rank fraction used, we can greatly compress the amount of communication needed while producing the exact same end result (up to numerical precision). This technique originates from PowerSGD---see [Vogels et al., 2019](https://arxiv.org/abs/1905.13727) for more details.
 
@@ -344,7 +357,7 @@ This feature is applicable across any replicated data-parallel axis for DDP and 
 
 Note that `replicate_mesh_grad_sync=True` results in *decoupled momentum*. The optimizer's internal momentum states will diverge across data-parallel processes. (Model weight updates always remain identical.) Before saving a checkpoint, you must explicitly tell Dion to synchronize internal states. See the [Checkpointing](#checkpointing) section for more details.
 
-### Usage with HSDP
+#### Usage with HSDP
 
 Typically, hybrid sharding with `fully_shard()` uses a 2D device mesh. To use with Dion's compressed gradient synchronization, pass only the sharded sub-mesh to `fully_shard()`.
 
@@ -357,7 +370,9 @@ Note that if we choose to disable Dion's compressed gradient synchronization, we
 | Dion syncs compressed states | 1D shard sub-mesh           | `True`                     | Decoupled        | Always synchronous |
 | FSDP syncs full gradients    | 2D hybrid-shard mesh        | `False`                    | Synchronous      | Always synchronous |
 
-### Example Code
+#### Example Codes
+
+We provide example codes for compressed-DP sync under HSDP scenarios.
 
 ```python
 # ------------------------------------------------------------
@@ -389,8 +404,6 @@ opt = Dion(
 )
 ```
 
-### Usage with DDP
-
 To use compressed gradient synchronization with DDP, always run the model with the `no_sync()` context.
 
 ```python
@@ -413,9 +426,9 @@ for data in dataloader:
     model.zero_grad()
 ```
 
-### Checkpointing
+#### Checkpointing under Compressed-DP Sync
 
-Dion requires synchronizing optimizer state before saving a checkpoint. Because of Dion's decoupled momentum, internal optimizer states will be different across the replicate mesh. Call the `synchronize_for_checkpoint()` function to explicitly perform an all-reduce of optimizer states. This ensures the consistency of distributed checkpoints, since typically each state will only be saved by one process along the replicated data-parallel mesh. This function will be a no-op if `replicate_mesh_grad_sync=False` or no replicate mesh is used.
+Dion when `replicate_mesh_grad_sync = True` requires synchronizing optimizer state before saving a checkpoint. This is because of Dion's decoupled momentum, where internal optimizer states will be different across the replicate mesh. Call the `synchronize_for_checkpoint()` function to explicitly perform an all-reduce of optimizer states. This ensures the consistency of distributed checkpoints, since typically each state will only be saved by one process along the replicated data-parallel mesh. This function will be a no-op if `replicate_mesh_grad_sync=False` or no replicate mesh is used.
 
 If model parameters are `DTensor` type, the optimizer states will also be `DTensor`s. Checkpoints should be saved using [torch.distributed.checkpoint](https://docs.pytorch.org/docs/stable/distributed.checkpoint.html).
 
@@ -437,6 +450,8 @@ optimizer.step()
 model.zero_grad()
 
 # Call this before checkpointing
+# This is only for Dion with `replicate_mesh_grad_sync=True` so
+# For other optimizers, this is not required
 optimizer.synchronize_for_checkpoint()
 
 # Save a distributed checkpoint
@@ -444,18 +459,6 @@ model_state_dict, opt_state_dict = get_state_dict(model, optimizer)
 checkpoint = { "model": model_state_dict, "optimizer": opt_state_dict }
 dcp.save(checkpoint, ...)
 ```
-
-
-## Best Practices
-
-* **Dion rank fraction:** The most important Dion-specific hyperparameter is the *rank fraction*, which controls the amount of low-rank compression. Setting `rank_fraction=1.0` resulting in full-rank updates without any compression, similar to Muon. Empirically, it appears that larger models are more tolerant of low-rank compression. At 3B parameters, `rank_fraction=0.25` (1/4 rank) achieves nearly equivalent performance as full-rank, and we expect that 1/8, 1/16, and perhaps lower rank fractions will work well at 10B+ scale.
-* **Lion vs. AdamW:** We have found that Lion performs better than AdamW for optimizing scalar parameters when used with Dion/Muon for orthonormal matrix updates.
-* **2D sharding:** If weights are sharded with both FSDP and TP, it is required that the sharding methods are applied to different matrix dimensions. The TP sharding dimension is controlled via `RowwiseParallel` and `ColwiseParallel`, but the FSDP sharding dimension needs to be manually specified when applied on top of TP. See `models/gpt_model.py` for an example of explicitly providing `fully_shard()` with per-parameter shard dimensions. Double-sharded matrices along the same dimension will raise an error in Dion.
-* **Learning rate scaling:** Dion will automatically scale the provided learning rate by `sqrt(d_out / d_in)` for matrix parameters. Muon will apply the same scaling by default, but also supports the `0.2 * sqrt(max(d_in, d_out))` scale factor recommended by Moonshot AI. Our default scale factor is intended to induce a consistent change to activation vector values, which enables learning rate transfer across model size. See [Deriving Muon](https://jeremybernste.in/writing/deriving-muon) for more information.
-* **Nesterov momentum:** In Muon, we set Nesterov momentum to `False` by default, as we observed better performance without it. Dion does not implement Nesterov momentum.
-
-
-## Experimental Features
 
 ### Mixed Precision Dion
 
@@ -475,18 +478,7 @@ optimizer = Dion(
     ...
 )
 ```
-
-### Faster Dion for lower ranks
-
-After a few warmup iterations, the expensive QR decomposition can be replaced with the Cholesky QR (CQR) algorithm, leading to **2X** optimization step speedups. CQR is faster but less numerically stable. We have found that after some initial warmup period, the input matrix for orthogonalization becomes relatively well-conditioned. If Cholesky decomposition fails, we fall back to the standard QR decomposition procedure.
-
-To try out the CQR accelerated configuration:
-```bash
-torchrun --standalone --nproc_per_node=8 train.py --config configs/dion_efficient_160m.yaml
-```
-
-After the training you should be able to reproduce the second plot in [validation curves for GPT-small](https://microsoft-research.wandb.io/t-gmagakyan/dion-exp/reports/Validation-curves-for-GPT-small--VmlldzoxNjk5OA?accessToken=52e6z4d18yfkewz1bawlkmwc2m91al9ssa7rpwvnx1f1xa66j15lr7x315wj2kys).
-
+ 
 ### Triton Kernels for Muon Newton-Schulz
 
 Muon's Newton-Schulz iteration involves multiplying a matrix by its own transpose. The result is symmetric, so we can accelerate this computation by only computing half of the output and mirroring the result across the diagonal. We implemented this technique with Triton kernels in `optimizers/newton_schulz_triton.py`.
