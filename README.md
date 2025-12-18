@@ -3,7 +3,7 @@
 This repository provides efficient implementations of orthonormal optimizers for distributed ML training.
 You can find the following optimizers:
 * [Muon](https://kellerjordan.github.io/posts/muon/)
-* Dion2 and [Dion](https://arxiv.org/pdf/2504.05295) Dion is a legacy optimizer; we recommend using Dion2)
+* Dion2 and [Dion](https://arxiv.org/pdf/2504.05295) (Dion is a legacy optimizer; we recommend using Dion2)
 * [NorMuon](https://arxiv.org/abs/2510.05491) 
 
 
@@ -126,7 +126,7 @@ This configuration creates:
 - **2-way tensor parallelism**  
 - **Total**: 8 GPUs with 2-way DP × 2-way FSDP × 2-way TP
 
-**General rule**: The product `dp_size × fs_size × tp_size` must equal `nproc_per_node`. Any unspecified dimension defaults to 1.
+**General rule**: The product `dp_size × fs_size × tp_size` must equal `world_size`. Any unspecified dimension defaults to 1.
 
 
 ## Introduction
