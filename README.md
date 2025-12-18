@@ -131,16 +131,16 @@ This configuration creates:
 
 ## Introduction
 
-Optimization algorithms are essential to training neural networks, converting gradients into model weight updates to minimize loss. For many years, the state-of-the-art method has been [Adam](https://arxiv.org/abs/1412.6980)/[AdamW](https://arxiv.org/abs/1711.05101). However, recent work has shown that **orthonormal matrix optimizers** can significantly accelerate model convergence. Check out blog posts by [Jeremy Bernstein](https://jeremybernste.in/writing/deriving-muon) and [Laker Newhouse](https://www.lakernewhouse.com/writing/muon-1) for more details.
+Optimization algorithms are essential to training neural networks, converting gradients into model weight updates to minimize loss. For many years, the method of choice has been [Adam](https://arxiv.org/abs/1412.6980)/[AdamW](https://arxiv.org/abs/1711.05101). However, recent work has shown that **orthonormal optimizers** can significantly accelerate model convergence. Check out blog posts by [Jeremy Bernstein](https://jeremybernste.in/writing/deriving-muon) and [Laker Newhouse](https://www.lakernewhouse.com/writing/muon-1) for more details.
 
-The practical effectiveness of orthonormal updates was first demonstrated by [Muon](https://kellerjordan.github.io/posts/muon/) in the [NanoGPT speedrun](https://github.com/KellerJordan/modded-nanogpt), and has since been validated at scale by models such as [Kimi K2](https://arxiv.org/abs/2507.20534) and [GLM-4.5](https://z.ai/blog/glm-4.5). Muon implements orthonormalization via *Newton-Schulz iterations*, which relies on repeated matrix-matrix multiplications. However, large-scale training relies on model sharding, where weight matrices and optimizer states are distributed across multiple processes. As discussed by [Essential AI](https://www.essential.ai/blog/infra), orthonormalizing a sharded matrix with Newton-Schulz iterations involves the communication-intensive procedure of reconstructing the full matrices from their individual shards.
+The practical effectiveness of orthonormal optimizers was first demonstrated by [Muon](https://kellerjordan.github.io/posts/muon/) in the [NanoGPT speedrun](https://github.com/KellerJordan/modded-nanogpt), and has since been validated at scale by models such as [Kimi K2](https://arxiv.org/abs/2507.20534) and [GLM-4.5](https://z.ai/blog/glm-4.5). Muon implements orthonormalization via *Newton-Schulz iterations*, which relies on repeated matrix-matrix multiplications. However, large-scale training relies on model sharding, where weight matrices and optimizer states are distributed across multiple processes. As discussed by [Essential AI](https://www.essential.ai/blog/infra), orthonormalizing a sharded matrix with Newton-Schulz iterations involves the communication-intensive procedure of reconstructing the full matrices from their individual shards.
 
-**Dion/Dion2** are our methods for building a **scalable, communication-efficient** optimizer. Like Muon, it computes orthonormal weight updates and has the same benefits of faster model convergence. The key difference is that Dion/Dion2 **shrink the matrix before orthonormalization**. Dion uses power iteration to compute a low-rank approximation, while Dion2 applies a simple submatrix-selection procedure. To reduce information loss, both methods include an error-feedback mechanism that tracks the discrepancy between the original matrix and its compressed approximation.
+**Dion/Dion2** are our methods for building a **scalable, communication-efficient** optimizer. Like Muon, they compute matrix weight updates based on matrix orthonormalization and share similar practical benefits. The key difference is that Dion and Dion2 **shirnk the matrix before orthonormalization**, reducing both computational and communication costs. Dion uses power iteration to compute a low-rank approximation, while Dion2 applies a simple submatrix-selection procedure. To reduce information loss, both methods include an error-feedback mechanism that tracks the discrepancy between the original matrix and its compressed approximation.
 
 
 ## Optimizers
 
-Our main implementations of Dion (`dion.py`) and Muon (`muon.py`) support the following parallelization techniques:
+Our current implementations support the following parallelization techniques:
 
 | Parallelization    | Dion | Dion2 | Muon | NorMuon |
 |--------------------|------|-------|------|---------| 
@@ -149,13 +149,13 @@ Our main implementations of Dion (`dion.py`) and Muon (`muon.py`) support the fo
 | PyTorch FSDP2      | Yes  |  Yes  | Yes  |   Yes   |
 | PyTorch FSDP2 + TP | Yes  |  No   | No   |   No    |
 
-For faster performance, both of these optimizers will process parameters in batches and interleave multiple batches to overlap compute with communication.
+For faster performance, these optimizers will process parameters in batches and interleave multiple batches to overlap compute with communication.
 
 We include optimizer implementations in the `dion/` directory of this repo.
  
 * `dion.py`: High-performance version of Dion. Depending on how each batch of matrices is sharded, we select the best communication patterns to compute Dion's orthonormal update. All-reduce operations may be split into reduce-scatter and all-gather across the batch dimension to more efficiently distribute work and avoid redundant computation.
 * `muon.py`: High-performance version of Muon. For sharded matrices, all-to-all communication is used to simultaneously unshard and distribute a batch of matrices. For replicated matrices, Muon will distribute work across all devices and all-gather final results.
-* `dion2.py`: A preliminary implementation of Dion2, which uses a similar all-to-all communication pattern to distribute orthonormalization. Only an $\alpha$-fraction of the momentum matrix is orthonormalized, leaving room for additional communication optimizations.
+* **`dion2.py`**: High-performance implementation of Dion2, using a similar all-to-all communication pattern for distributed orthonormalization. Only an α-fraction of the momentum matrix is communicated and orthonormalized, significantly reducing both communication overhead and computation cost.
 * `normuon.py`: A variant of the Muon optimizer that introduces neuron-wise normalization to improve stability and convergence efficiency, modified to take similar arguments as `muon.py`. See [the paper](https://arxiv.org/abs/2510.05491) for more details.
 
 We also provide some reference implementations:
@@ -184,11 +184,11 @@ We summarize the above in this table. Let `d_in` be the input dimension of the u
 
 | Type          | Example parameters                          | Optimizer `algorithm` | Learning rate `lr`     |
 |---------------|---------------------------------------------|-----------------------|------------------------|
-| Weight matrix | `nn.Linear.weight`                          | `"dion"` / `"muon"`   | `lr`                   |
-| Bias vector   | `nn.Linear.bias`                            | `"lion"` / `"adamw"`  | `lr`                   |
-| Normalization | `nn.LayerNorm.weight`, `nn.LayerNorm.bias`  | `"lion"` / `"adamw"`  | `lr`                   |
-| Embedding     | `nn.Embedding.weight`                       | `"lion"` / `"adamw"`  | `lr`                   |
-| Unembedding   | `nn.Linear.weight` (must identify manually) | `"lion"` / `"adamw"`  | `lr / math.sqrt(d_in)` |
+| Weight matrix | `nn.Linear.weight`                          | `"dion2"` / `"muon"`  | `lr`                   |
+| Bias vector   | `nn.Linear.bias`                            | `"adamw"` / `"lion"`  | `lr`                   |
+| Normalization | `nn.LayerNorm.weight`, `nn.LayerNorm.bias`  | `"adamw"` / `"lion"`  | `lr`                   |
+| Embedding     | `nn.Embedding.weight`                       | `"adamw"` / `"lion"`  | `lr`                   |
+| Unembedding   | `nn.Linear.weight` (must identify manually) | `"adamw"` / `"lion"`  | `lr / math.sqrt(d_in)` |
 
 We emphasize again that **particular care** needs to be taken with **embedding and unembedding layers**. They must be isolated from ordinary matrix parameters, and the unembedding layer furthermore should use a scaled learning rate. Merely checking the dimensions of a parameter (such as `if p.ndim == 2`) or the type of the module (such as `if isinstance(module, nn.Linear)`) **is not sufficient** to identify these special parameters. This is why we require manual parameter group creation.
 
@@ -214,9 +214,9 @@ lm_head_params= list(model.lm_head.parameters())
 
 param_groups = [
     dict(params=matrix_params),  # will default to "dion" algorithm
-    dict(params=vector_params, algorithm="lion"),
-    dict(params=embed_params, algorithm="lion"),
-    dict(params=lm_head_params, algorithm="lion", lr=lr / math.sqrt(model_dim))
+    dict(params=vector_params, algorithm="adamw"),
+    dict(params=embed_params, algorithm="adamw"),
+    dict(params=lm_head_params, algorithm="adamw", lr=lr / math.sqrt(model_dim))
 ]
 
 optimizer = Dion(
@@ -231,16 +231,17 @@ Additional hyperparameters may be specified on a per-parameter-group basis to ov
 ```python
 param_groups = [
     dict(params=matrix_params),
-    dict(params=vector_params, algorithm="lion"),
-    dict(params=embed_params, algorithm="lion", weight_decay=0),
-    dict(params=lm_head_params, algorithm="lion", lr=lr / math.sqrt(model_dim), weight_decay=0)
+    dict(params=vector_params, algorithm="adamw"),
+    dict(params=embed_params, algorithm="adamw", weight_decay=0),
+    dict(params=lm_head_params, algorithm="adamw", lr=lr / math.sqrt(model_dim), weight_decay=0)
 ]
 ```
 
 
 ## Distributed Training Configuration
 
-In order for our efficient distributed optimizers to work, they must know about the parallelization scheme for training your model. This is done by passing in `DeviceMesh` objects when constructing the optimizer.
+For our efficient distributed optimizers to work correctly, they need information about the model's parallelization scheme. This is provided by passing `DeviceMesh` objects during optimizer construction.
+We demonstrate this for Dion first, since it has the most comprehensive parallelism support in our current implementation.  
 
 ### Device Mesh for Dion
 
@@ -289,7 +290,7 @@ optimizer = Dion(
 )
 ```
 
-### Device Mesh for Muon
+### Device Mesh for Dion2, Muon and Others
 
 Muon uses different device mesh arguments from Dion.
 
