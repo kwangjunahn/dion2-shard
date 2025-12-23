@@ -567,7 +567,8 @@ def dion2_pre_orthogonalize(
     Update momentum with gradient and compute the input to orthogonalization.
     More specifically, it does the following steps:
         - updates the momentum with gradient
-        - computes the top-k indices to determine submatrices
+        - computes the top-k indices (according to L1 norm) to determine submatrices
+        - (other norms can be used such as L2 norm)
         - does in-place error-feedback decay on the selected submatrices
         - output submatrices and indices
     Inputs and outputs should be lists of regular Tensor, not DTensor.
