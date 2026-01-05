@@ -3,7 +3,7 @@
 This repository provides efficient implementations of orthonormal optimizers for distributed ML training.
 You can find the following optimizers:
 * [Muon](https://kellerjordan.github.io/posts/muon/)
-* Dion2 and [Dion](https://arxiv.org/pdf/2504.05295) (Dion is a legacy optimizer; we recommend using Dion2)
+* [Dion2](https://arxiv.org/abs/2512.16928) and [Dion](https://arxiv.org/pdf/2504.05295) (Dion is a legacy optimizer; we recommend using Dion2)
 * [NorMuon](https://arxiv.org/abs/2510.05491) 
 
 
@@ -107,6 +107,9 @@ This configuration creates:
 - **2-way data parallelism** across the FSDP groups
 - **Total**: 4 GPUs with 2-way FSDP × 2-way DP
 
+
+The product `dp_size × fs_size` must equal `world_size`. Any unspecified dimension defaults to 1.
+
 #### Tensor Parallelism (TP)
 
 **Note**: Currently, only Dion (our legacy implementation) supports Tensor Parallelism.
@@ -126,7 +129,7 @@ This configuration creates:
 - **2-way tensor parallelism**  
 - **Total**: 8 GPUs with 2-way DP × 2-way FSDP × 2-way TP
 
-**General rule**: The product `dp_size × fs_size × tp_size` must equal `world_size`. Any unspecified dimension defaults to 1.
+The product `dp_size × fs_size × tp_size` must equal `world_size`. Any unspecified dimension defaults to 1.
 
 
 ## Introduction
@@ -219,7 +222,7 @@ param_groups = [
     dict(params=lm_head_params, algorithm="adamw", lr=lr / math.sqrt(model_dim))
 ]
 
-optimizer = Dion(
+optimizer = Dion2(
     param_groups,
     lr=lr,  # used for all param groups except for lm_head_params
     weight_decay=0.1,  # default setting for all param groups
@@ -310,7 +313,7 @@ optimizer = Dion2(                              # or Muon or NorMuon
 
 ### 2D-Sharding Support for Dion
   
-Dion supports up to two sharded mesh dimensions and any number of data-parallel replicated mesh dimensions. The sharded meshes are referred to as `outer_shard_mesh` and `inner_shard_mesh`. Dion's internal optimizer states can be sharded over both meshes. During the update computation, Dion will orthonormalize a low-rank matrix that is replicated across `outer_shard_mesh`, but always remains sharded across `inner_shard_mesh`. Thus, the `inner_shard_mesh` is more communication-intensive and works best with intra-node tensor parallelism. Both sharding meshes must be one-dimensional.
+Our legacy optimizer Dion supports up to two sharded mesh dimensions and any number of data-parallel replicated mesh dimensions. The sharded meshes are referred to as `outer_shard_mesh` and `inner_shard_mesh`. Dion's internal optimizer states can be sharded over both meshes. During the update computation, Dion will orthonormalize a low-rank matrix that is replicated across `outer_shard_mesh`, but always remains sharded across `inner_shard_mesh`. Thus, the `inner_shard_mesh` is more communication-intensive and works best with intra-node tensor parallelism. Both sharding meshes must be one-dimensional.
 
 Unused meshes may be omitted or given as `None`. If only one sharding dimension is used (e.g. only FSDP without TP), we recommend providing it as the `outer_shard_mesh`. Dion will execute a faster single-device orthonormalization routine in this case, since the input matrix to be orthonormalized will not be sharded.
 
@@ -336,8 +339,7 @@ optimizer = Dion(
 
 ## Best Practices
 
-* **Dion rank fraction:** The most important Dion-specific hyperparameter is the *rank fraction*, which controls the amount of low-rank compression. Setting `rank_fraction=1.0` resulting in full-rank updates without any compression, similar to Muon. Empirically, it appears that larger models are more tolerant of low-rank compression. At 3B parameters, `rank_fraction=0.25` (1/4 rank) achieves nearly equivalent performance as full-rank, and we expect that 1/8, 1/16, and perhaps lower rank fractions will work well at 10B+ scale.
-* **Lion vs. AdamW:** We have found that Lion performs better than AdamW for optimizing scalar parameters when used with Dion/Muon for orthonormal matrix updates.
+* **Dion/Dion2 rank fraction:** The most important Dion-specific hyperparameter is the *rank fraction*, which controls the amount of low-rank compression. Setting `rank_fraction=1.0` resulting in full-rank updates without any compression, similar to Muon. Empirically, it appears that larger models are more tolerant of low-rank compression. At 3B parameters, `rank_fraction=0.25` (1/4 rank) achieves nearly equivalent performance as full-rank, and we expect that 1/8, 1/16, and perhaps lower rank fractions will work well at 10B+ scale.
 * **2D sharding:** If weights are sharded with both FSDP and TP, it is required that the sharding methods are applied to different matrix dimensions. The TP sharding dimension is controlled via `RowwiseParallel` and `ColwiseParallel`, but the FSDP sharding dimension needs to be manually specified when applied on top of TP. See `models/gpt_model.py` for an example of explicitly providing `fully_shard()` with per-parameter shard dimensions. Double-sharded matrices along the same dimension will raise an error in Dion.
 * **Learning rate scaling:** Dion will automatically scale the provided learning rate by `sqrt(d_out / d_in)` for matrix parameters. Muon will apply the same scaling by default, but also supports the `0.2 * sqrt(max(d_in, d_out))` scale factor recommended by Moonshot AI. Our default scale factor is intended to induce a consistent change to activation vector values, which enables learning rate transfer across model size. See [Deriving Muon](https://jeremybernste.in/writing/deriving-muon) for more information.
 * **Nesterov momentum:** In Muon, we set Nesterov momentum to `False` by default, as we observed better performance without it. Dion does not implement Nesterov momentum.
@@ -488,7 +490,16 @@ Triton kernels can be enabled in Muon with the option `use_triton=True`. Note th
 
 # Citation 
 
-If you use Dion in your research, please cite:
+If you use Dion/Dion2 in your research, please cite:
+
+```bash
+@article{ahn2025dion2,
+  title={Dion2: A Simple Method to Shrink Matrix in Muon},
+  author={Ahn, Kwangjun and Amsel, Noah and Langford, John},
+  journal={arXiv preprint 2512.16928},
+  year={2025}
+}
+``` 
 
 ```bash
 @article{ahn2025dion,
